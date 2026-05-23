@@ -11,10 +11,21 @@
   <img src="./.github/agent_profiler_overview.png" alt="agent-profiler app overview" width="80%" />
 </p>
 
-<table>
+<table width="100%">
   <tr>
-    <td width="50%" align="center"><strong>Flow View</strong><br /><br /><img src="./.github/agent_profiler_flow.png" alt="agent-profiler flow view" width="100%" /></td>
-    <td width="50%" align="center"><strong>Trajectory View</strong><br /><br /><img src="./.github/agent_profiler_trajectory.png" alt="agent-profiler trajectory view" width="100%" /></td>
+    <td width="100%" align="center"><strong>Trajectory View</strong><br /><em>See what tool calls what tools were called and how they impacted the context window</em><br /><br /><img src="./.github/agent_profiler_trajectory.png" alt="agent-profiler trajectory view" width="100%" /></td>
+  </tr>
+  <tr><td><hr /></td></tr>
+  <!-- <tr> -->
+  <!--   <td width="100%" align="center"><strong>Trajectory View</strong><br /><em>Alternate layout that emphasizes parent/child relationships between turns, subagents, and tool calls.</em><br /><br /><img src="./.github/agent_profiler_flow_v2.png" alt="agent-profiler trajectory view" width="100%" /></td> -->
+  <!-- </tr> -->
+  <tr><td><hr /></td></tr>
+  <tr>
+    <td width="100%" align="center"><strong>Flow View</strong><br /><em>Use a directed graph to see what subagents and skills were spawned and with what context.</em><br /><br /><img src="./.github/agent_profiler_flow.png" alt="agent-profiler flow view" width="100%" /></td>
+  </tr>
+  <tr><td><hr /></td></tr>
+  <tr>
+    <td width="100%" align="center"><strong>Summary View</strong><br /><em>Tool call leaderboard to identify which steps get repeated every session that could be lifted into a skill, doc, or cached lookup.</em><br /><br /><img src="./.github/agent_profiler_summary.png" alt="agent-profiler flow view" width="100%" /></td>
   </tr>
 </table>
 

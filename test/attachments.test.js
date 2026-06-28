@@ -660,7 +660,12 @@ test('getRequestId prefers requestId over message.id when both present', () => {
         model: 'claude-sonnet-4-20250514',
         content: [{ type: 'text', text: 'hello' }],
         stop_reason: 'end_turn',
-        usage: { input_tokens: 50, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        usage: {
+          input_tokens: 50,
+          output_tokens: 10,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
       },
     }),
   ];

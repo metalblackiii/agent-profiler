@@ -80,6 +80,17 @@ const reasoning = (ts) => ({
   payload: { type: 'reasoning', summary: [], content: null, encrypted_content: 'x'.repeat(200) },
 });
 
+const reasoningWithSummary = (ts, text) => ({
+  type: 'response_item',
+  timestamp: ts,
+  payload: {
+    type: 'reasoning',
+    summary: [{ type: 'summary_text', text }],
+    content: null,
+    encrypted_content: 'x'.repeat(200),
+  },
+});
+
 const assistantMessage = (ts, text) => ({
   type: 'response_item',
   timestamp: ts,
@@ -162,6 +173,45 @@ test('codex: single turn with one inference, no tools', () => {
   // No tools
   assert.equal(t.toolCount, 0);
   assert.equal(inf.children.length, 0);
+});
+
+test('codex: reasoning summary extracted when model_reasoning_summary is set', () => {
+  const rows = [
+    sessionMeta('2026-01-01T00:00:00.000Z'),
+    taskStarted('2026-01-01T00:00:01.000Z', 'T1'),
+    turnContext('2026-01-01T00:00:01.000Z', 'T1', 'gpt-5'),
+    userMessage('2026-01-01T00:00:01.000Z', 'explain caching'),
+    reasoningWithSummary('2026-01-01T00:00:02.000Z', '**Analyzing caching strategies**'),
+    assistantMessage('2026-01-01T00:00:02.500Z', 'Here is how caching works…'),
+    tokenCount('2026-01-01T00:00:03.000Z', 100, 10, 0, 5),
+    taskComplete('2026-01-01T00:00:04.000Z', 'T1'),
+  ];
+  const traces = transform(rows);
+  const inf = traces[0].root.children[0];
+  const reasoningEvent = inf.events.find((e) => e.name === 'gen_ai.assistant.reasoning');
+  assert.ok(reasoningEvent, 'reasoning event should exist');
+  assert.equal(
+    reasoningEvent.attributes['gen_ai.reasoning.content'],
+    '**Analyzing caching strategies**',
+  );
+});
+
+test('codex: encrypted-only reasoning falls back to byte count', () => {
+  const rows = [
+    sessionMeta('2026-01-01T00:00:00.000Z'),
+    taskStarted('2026-01-01T00:00:01.000Z', 'T1'),
+    turnContext('2026-01-01T00:00:01.000Z', 'T1', 'gpt-5'),
+    userMessage('2026-01-01T00:00:01.000Z', 'hello'),
+    reasoning('2026-01-01T00:00:02.000Z'),
+    assistantMessage('2026-01-01T00:00:02.500Z', 'hi'),
+    tokenCount('2026-01-01T00:00:03.000Z', 100, 10),
+    taskComplete('2026-01-01T00:00:04.000Z', 'T1'),
+  ];
+  const traces = transform(rows);
+  const inf = traces[0].root.children[0];
+  const reasoningEvent = inf.events.find((e) => e.name === 'gen_ai.assistant.reasoning');
+  assert.ok(reasoningEvent, 'reasoning event should exist');
+  assert.match(String(reasoningEvent.attributes['gen_ai.reasoning.content']), /encrypted.*200/);
 });
 
 test('codex: function_call paired with function_call_output by call_id', () => {

@@ -603,3 +603,69 @@ test('user can identify a nested_memory-driven spike from turn fields alone', ()
   );
   assert.equal(top.attributes?.['agent_trace.attachment.type'], 'nested_memory');
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// getRequestId fallback: records with message.id but no top-level requestId
+
+test('assistant record with message.id (no requestId) produces token data', () => {
+  // Claude Code transcripts store the API message ID at rec.message.id,
+  // not at rec.requestId. getRequestId falls back to message.id.
+  const msgId = 'msg_01WppYCNguBaZASRytWVxt5y';
+  const records = [
+    userPrompt('hi'),
+    rec({
+      type: 'assistant',
+      timestamp: '2026-04-23T12:00:02.000Z',
+      // No requestId — only message.id
+      message: {
+        id: msgId,
+        role: 'assistant',
+        model: 'claude-sonnet-4-20250514',
+        content: [{ type: 'text', text: 'hello' }],
+        stop_reason: 'end_turn',
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cache_read_input_tokens: 80,
+          cache_creation_input_tokens: 10,
+        },
+      },
+    }),
+  ];
+  const [turn] = toTraces('s-msgid', bundleOf(records));
+  const attrs = turn.root.attributes;
+
+  // Token data must flow through (not be silently dropped)
+  assert.equal(attrs['agent_trace.turn.input_tokens'], 100);
+  assert.equal(attrs['agent_trace.turn.output_tokens'], 20);
+  assert.equal(attrs['agent_trace.turn.cache_read_tokens'], 80);
+  assert.equal(attrs['agent_trace.turn.cache_creation_tokens'], 10);
+
+  // Inference span should carry the message.id as its request_id
+  const inference = turn.root.children.find((c) => c.name.startsWith('inference'));
+  assert.ok(inference, 'inference span must exist');
+  assert.equal(inference.attributes['agent_trace.inference.request_id'], msgId);
+});
+
+test('getRequestId prefers requestId over message.id when both present', () => {
+  const records = [
+    userPrompt('hi'),
+    rec({
+      type: 'assistant',
+      timestamp: '2026-04-23T12:00:02.000Z',
+      requestId: 'req_top_level',
+      message: {
+        id: 'msg_nested',
+        role: 'assistant',
+        model: 'claude-sonnet-4-20250514',
+        content: [{ type: 'text', text: 'hello' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 50, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      },
+    }),
+  ];
+  const [turn] = toTraces('s-precedence', bundleOf(records));
+  const inference = turn.root.children.find((c) => c.name.startsWith('inference'));
+  assert.ok(inference, 'inference span must exist');
+  assert.equal(inference.attributes['agent_trace.inference.request_id'], 'req_top_level');
+});

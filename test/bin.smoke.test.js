@@ -118,6 +118,49 @@ test('boots, answers /api/health, shuts down cleanly on SIGTERM', async () => {
   }
 });
 
+test('/api/traces?sessionId= filters to a direct-id lookup instead of the recency window', async () => {
+  const { proc, port } = await startCli();
+  try {
+    const unfiltered = await get(`http://localhost:${port}/api/traces`);
+    assert.equal(unfiltered.status, 200);
+    const allTraces = JSON.parse(unfiltered.body).traces;
+
+    const miss = await get(`http://localhost:${port}/api/traces?sessionId=does-not-exist-anywhere`);
+    assert.equal(miss.status, 200);
+    const missJson = JSON.parse(miss.body);
+    assert.deepEqual(missJson.traces, []);
+    assert.equal(typeof missJson.version, 'string');
+
+    // The miss assertion above is also what an *unfiltered* param would
+    // produce on a machine with zero discoverable sessions — that would pass
+    // even if the handler silently ignored `sessionId` entirely. Only assert
+    // the positive-match case when this environment actually has a real
+    // session to filter down to; skip (loudly) rather than asserting on
+    // fabricated content, since sessions.js's discovery root isn't overridable.
+    if (allTraces.length === 0) {
+      console.warn(
+        '[smoke] no discoverable sessions on this machine — skipping the positive-match assertion.',
+      );
+      return;
+    }
+    const realId = allTraces[0].sessionId;
+    const match = await get(
+      `http://localhost:${port}/api/traces?sessionId=${encodeURIComponent(realId)}`,
+    );
+    assert.equal(match.status, 200);
+    /** @type {any[]} */
+    const matched = JSON.parse(match.body).traces;
+    assert.ok(matched.length > 0, 'expected at least one trace for a real sessionId');
+    assert.ok(
+      matched.every((/** @type {any} */ t) => t.sessionId === realId),
+      'filtered result must only contain the requested sessionId',
+    );
+  } finally {
+    proc.kill('SIGTERM');
+    await once(proc, 'exit');
+  }
+});
+
 test('serves index.html at /', async () => {
   const { proc, port } = await startCli();
   try {

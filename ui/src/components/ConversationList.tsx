@@ -1,4 +1,5 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Input } from '@/components/ui/input';
 import { getFirstAssistantPreview, selectConversationPreview } from '@/lib/conversation';
 import { HarnessAvatar, harnessMeta } from '@/lib/harnesses';
 import { cn, formatRelativeTime, formatTimestamp } from '@/lib/utils';
@@ -9,7 +10,11 @@ import { useEffect, useMemo, useState } from 'react';
 interface Props {
   conversations: ConversationSummary[];
   selectedSessionId: string | null;
-  onSelect: (sessionId: string) => void;
+  // sessionId alone doesn't uniquely identify a conversation — paired with
+  // harness, it does (see App.tsx's bySession comment). null while App.tsx's
+  // reconciliation effect hasn't resolved harness for the current selection yet.
+  selectedHarness: string | null;
+  onSelect: (sessionId: string, harness: string) => void;
 }
 
 interface ProjectGroup {
@@ -78,8 +83,29 @@ function groupByProject(conversations: ConversationSummary[]): ProjectGroup[] {
   return groups;
 }
 
-export function ConversationList({ conversations, selectedSessionId, onSelect }: Props) {
-  const groups = useMemo(() => groupByProject(conversations), [conversations]);
+export function ConversationList({
+  conversations,
+  selectedSessionId,
+  selectedHarness,
+  onSelect,
+}: Props) {
+  // Free-text filter over session id (full or prefix — the shape a UUID
+  // handed in from an external tool like ptek-beacon arrives in) and the
+  // sidebar's own preview text. Grouping runs on the filtered set, so a
+  // group with no matches simply doesn't render.
+  const [query, setQuery] = useState('');
+  const trimmedQuery = query.trim().toLowerCase();
+
+  const filtered = useMemo(() => {
+    if (!trimmedQuery) return conversations;
+    return conversations.filter((c) => {
+      if (c.sessionId.toLowerCase().includes(trimmedQuery)) return true;
+      const preview = selectConversationPreview(c);
+      return preview ? preview.toLowerCase().includes(trimmedQuery) : false;
+    });
+  }, [conversations, trimmedQuery]);
+
+  const groups = useMemo(() => groupByProject(filtered), [filtered]);
 
   // Controlled open-state per group, keyed by cwd. Groups default to closed;
   // only user-opened groups (or auto-expanded ones via selection) are persisted.
@@ -89,13 +115,20 @@ export function ConversationList({ conversations, selectedSessionId, onSelect }:
   // session" reveals the active conversation.
   useEffect(() => {
     if (!selectedSessionId) return;
+    // selectedHarness may still be null right after a bare `?session=` deep
+    // link (App.tsx hasn't resolved it yet) — stay permissive on sessionId
+    // alone in that window rather than failing to expand anything.
     const target = groups.find((g) =>
-      g.conversations.some((c) => c.sessionId === selectedSessionId),
+      g.conversations.some(
+        (c) =>
+          c.sessionId === selectedSessionId &&
+          (selectedHarness == null || c.harness === selectedHarness),
+      ),
     );
     if (!target) return;
     const key = groupKey(target);
     setOpenByKey((prev) => (prev[key] ? prev : { ...prev, [key]: true }));
-  }, [selectedSessionId, groups]);
+  }, [selectedSessionId, selectedHarness, groups]);
 
   if (conversations.length === 0) {
     return <div className="p-6 text-xs text-muted-foreground">No conversations captured yet.</div>;
@@ -105,6 +138,21 @@ export function ConversationList({ conversations, selectedSessionId, onSelect }:
 
   return (
     <div>
+      <div className="border-b border-border p-2">
+        <Input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by session ID or prompt…"
+          aria-label="Search conversations by session ID or prompt"
+          className="h-8 text-xs"
+        />
+      </div>
+      {groups.length === 0 && (
+        <div className="p-6 text-xs text-muted-foreground">
+          No conversations match "{query.trim()}".
+        </div>
+      )}
       {groups.map((group) => {
         const key = groupKey(group);
         const open = isOpen(key);
@@ -136,16 +184,16 @@ export function ConversationList({ conversations, selectedSessionId, onSelect }:
             <CollapsibleContent className="overflow-hidden motion-safe:data-[state=open]:animate-collapsible-down motion-safe:data-[state=closed]:animate-collapsible-up">
               <ul className="divide-y divide-border">
                 {group.conversations.map((c) => {
-                  const active = c.sessionId === selectedSessionId;
+                  const active = c.sessionId === selectedSessionId && c.harness === selectedHarness;
                   const sidShort = c.sessionId.slice(0, 8);
                   const firstPrompt = selectConversationPreview(c);
                   const label = firstPrompt ?? sidShort;
                   const preview = getFirstAssistantPreview(c);
                   return (
-                    <li key={c.sessionId} className="group relative">
+                    <li key={`${c.harness}::${c.sessionId}`} className="group relative">
                       <button
                         type="button"
-                        onClick={() => onSelect(c.sessionId)}
+                        onClick={() => onSelect(c.sessionId, c.harness)}
                         title={firstPrompt ?? undefined}
                         className={cn(
                           'w-full px-4 py-2.5 text-left transition-colors hover:bg-accent/40',

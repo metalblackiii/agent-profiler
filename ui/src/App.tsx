@@ -38,6 +38,22 @@ function formspreeErrorMessage(body: FormspreeErrorResponse | null): string {
   return messages && messages.length > 0 ? messages.join(' ') : 'Unable to submit interest.';
 }
 
+// Deep-link support: `?session=<uuid>` selects a conversation on load and is
+// kept in sync as the user navigates (see the selectedSessionId effect below).
+// `?harness=` disambiguates a session id that collides across harnesses —
+// vanishingly unlikely, but `sessionId` alone isn't a unique conversation key
+// (see the `bySession` comment in groupConversations below), so an external
+// deep link that only has a bare UUID can't rule it out.
+function sessionIdFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get('session');
+}
+
+function harnessFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get('harness');
+}
+
 // Adapter-stamped attribute (registry guarantees it's set on every trace root).
 function harnessOf(t: TraceSummary): string {
   const v = t.root.attributes['agent_trace.harness'];
@@ -98,8 +114,16 @@ function groupConversations(traces: TraceSummary[]): ConversationSummary[] {
 }
 
 export function App() {
-  const { traces, loading, error } = useTraces();
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  // Captured once on mount — the deep-link target, if any. Stable for the
+  // life of the component so useTraces' pinned-lookup effect doesn't re-fire.
+  const [pinnedSessionId] = useState<string | null>(sessionIdFromUrl);
+  const { traces, loading, error } = useTraces(5000, pinnedSessionId);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(sessionIdFromUrl);
+  // sessionId alone doesn't uniquely identify a conversation (see bySession
+  // below) — paired with harness, it does. null while unresolved: right after
+  // a bare `?session=` deep link, before the reconciliation effect below has
+  // matched it to a real conversation and filled in which harness it's from.
+  const [selectedHarness, setSelectedHarness] = useState<string | null>(harnessFromUrl);
   const [selectedSpan, setSelectedSpan] = useState<SpanNode | null>(null);
   const [showBanner, setShowBanner] = useState(true);
   const [showInterestForm, setShowInterestForm] = useState(false);
@@ -113,22 +137,49 @@ export function App() {
 
   const conversations = useMemo(() => groupConversations(traces), [traces]);
 
+  // Resolve (sessionId, harness) to one real conversation, or fall back to
+  // the most-recent one. A bare `?session=` deep link arrives with harness
+  // still null; this is also what fills that in once conversations load.
   useEffect(() => {
-    setSelectedSessionId((prev) => {
-      if (prev && conversations.some((c) => c.sessionId === prev)) return prev;
-      return conversations[0]?.sessionId ?? null;
-    });
-  }, [conversations]);
+    const resolved =
+      conversations.find(
+        (c) =>
+          c.sessionId === selectedSessionId &&
+          (selectedHarness == null || c.harness === selectedHarness),
+      ) ??
+      conversations.find((c) => c.sessionId === selectedSessionId) ??
+      conversations[0] ??
+      null;
+    const resolvedSessionId = resolved?.sessionId ?? null;
+    const resolvedHarness = resolved?.harness ?? null;
+    if (resolvedSessionId !== selectedSessionId) setSelectedSessionId(resolvedSessionId);
+    if (resolvedHarness !== selectedHarness) setSelectedHarness(resolvedHarness);
+  }, [conversations, selectedSessionId, selectedHarness]);
+
+  // Keep the URL's ?session=/&harness= params in sync with the current
+  // selection so a deep link (from ptek-beacon or elsewhere) round-trips, and
+  // the current view is shareable/reloadable.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (selectedSessionId) url.searchParams.set('session', selectedSessionId);
+    else url.searchParams.delete('session');
+    if (selectedHarness) url.searchParams.set('harness', selectedHarness);
+    else url.searchParams.delete('harness');
+    window.history.replaceState(null, '', url);
+  }, [selectedSessionId, selectedHarness]);
 
   const selected = useMemo(
-    () => conversations.find((c) => c.sessionId === selectedSessionId) ?? null,
-    [conversations, selectedSessionId],
+    () =>
+      conversations.find(
+        (c) => c.sessionId === selectedSessionId && c.harness === selectedHarness,
+      ) ?? null,
+    [conversations, selectedSessionId, selectedHarness],
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedSessionId is the intentional trigger — clear the selected span whenever the user navigates to a different conversation
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedSessionId/selectedHarness are the intentional trigger — clear the selected span whenever the user navigates to a different conversation
   useEffect(() => {
     setSelectedSpan(null);
-  }, [selectedSessionId]);
+  }, [selectedSessionId, selectedHarness]);
 
   useEffect(() => {
     if (selected) console.debug('[agent-trace]', selected);
@@ -348,7 +399,11 @@ export function App() {
             <ConversationList
               conversations={conversations}
               selectedSessionId={selectedSessionId}
-              onSelect={setSelectedSessionId}
+              selectedHarness={selectedHarness}
+              onSelect={(sessionId, harness) => {
+                setSelectedSessionId(sessionId);
+                setSelectedHarness(harness);
+              }}
             />
           </div>
         </aside>

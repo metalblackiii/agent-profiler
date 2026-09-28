@@ -305,6 +305,51 @@ test('codex: custom_tool_call (apply_patch) with metadata.exit_code', () => {
   assert.equal(t2.root.children[0].children[0].status?.code, 2);
 });
 
+test('codex: exec code-mode output — "Script failed" and user aborts are errors, others are not', () => {
+  const execOutput = (header, body) => [
+    { type: 'input_text', text: `${header}\nWall time 2.1 seconds\nOutput:\n` },
+    { type: 'input_text', text: body },
+  ];
+  const script = 'await tools.exec_command({cmd:"ls"})';
+  const rowsWith = (output, kind) => [
+    taskStarted('2026-01-01T00:00:01.000Z', 'T1'),
+    turnContext('2026-01-01T00:00:01.000Z', 'T1'),
+    userMessage('2026-01-01T00:00:01.000Z', 'run script'),
+    kind === 'function'
+      ? functionCall('2026-01-01T00:00:02.000Z', 'x1', 'exec', script)
+      : customToolCall('2026-01-01T00:00:02.000Z', 'x1', 'exec', script),
+    tokenCount('2026-01-01T00:00:02.500Z', 50, 5),
+    kind === 'function'
+      ? functionCallOutput('2026-01-01T00:00:03.000Z', 'x1', output)
+      : customToolCallOutput('2026-01-01T00:00:03.000Z', 'x1', output),
+    taskComplete('2026-01-01T00:00:04.000Z', 'T1'),
+  ];
+  const statusOf = (output, kind = 'custom') => {
+    const t = transform(rowsWith(output, kind))[0];
+    return { status: t.root.children[0].children[0].status, errorCount: t.errorCount };
+  };
+  const scriptFailed = execOutput(
+    'Script failed',
+    'Script error:\nReferenceError: i is not defined',
+  );
+
+  const failed = statusOf(scriptFailed);
+  assert.equal(failed.status?.code, 2);
+  assert.equal(failed.errorCount, 1);
+
+  assert.equal(statusOf(scriptFailed, 'function').status?.code, 2);
+  assert.equal(
+    statusOf(execOutput('Script completed', 'file.txt\n'), 'function').status,
+    undefined,
+  );
+
+  assert.equal(statusOf('aborted by user after 24.3s').status?.code, 2);
+  assert.equal(statusOf('aborted by user after 52.5s', 'function').status?.code, 2);
+
+  assert.equal(statusOf(execOutput('Script completed', 'file.txt\n')).status, undefined);
+  assert.equal(statusOf(execOutput('Script running with cell ID 7', '')).status, undefined);
+});
+
 test('codex: in-flight turn (no terminal) → isRunning: true', () => {
   const rows = [
     taskStarted('2026-01-01T00:00:01.000Z', 'T1'),

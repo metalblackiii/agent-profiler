@@ -43,6 +43,11 @@ const REGISTRY: Record<string, HarnessMeta> = {
     logoSrc: '/images/openai-logo.svg',
     invertOnDark: true,
   },
+  pi: {
+    displayName: 'pi',
+    logoSrc: '/images/pi-logo.svg',
+    invertOnDark: true,
+  },
 };
 
 /** Used when a harness id isn't in REGISTRY — defensive, shouldn't normally hit. */
